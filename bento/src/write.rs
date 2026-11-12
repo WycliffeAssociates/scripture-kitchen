@@ -6,6 +6,7 @@
 //!
 //!   order, sort, file names, categories   from canon: MAT is 41-MAT.usfm, sort 40
 //!   names                                 under "en" and the project's tag; defaultLocale "en"
+//!   book names                            MAT: {"en": "Matthew", "tpi": "Matyu"}: canon's English, the language's own
 //!   identification.primary                {"wacs": {"Tech_Advance/tpi_reg": {"revision": "latest", "timestamp": "2026-11-05"}}}
 //!   relationships                         wacs::WA-Catalog/en_ulb
 //!   checksums                             md5 and size of each book's bytes
@@ -234,6 +235,16 @@ pub(crate) fn named(tag: &str, s: &str) -> Node {
     )
 }
 
+/// A book's short name: canon's English under `en`, the language's own under
+/// its tag (Will, 2026-11-12). An `en` project's own name is its English one.
+pub(crate) fn book_name(tag: &str, book: BookKey, title: &str) -> Node {
+    let english = canon::book(book).map_or(title, |b| b.english);
+    if tag == "en" || tag.is_empty() {
+        return Node::map([("en", text(if tag.is_empty() { english } else { title }))]);
+    }
+    Node::map([("en", text(english)), (tag, text(title))])
+}
+
 fn localized(tag: &str, s: &str) -> Node {
     Node::map([(tag, text(s))])
 }
@@ -364,7 +375,7 @@ fn burrito(p: &NewBibleProject, placed: &[Placed<'_>], date: &str) -> Node {
             Node::map(placed.iter().map(|b| {
                 (
                     b.book.book.to_string(),
-                    Node::map([("short", named(tag, &b.book.title))]),
+                    Node::map([("short", book_name(tag, b.book.book, &b.book.title))]),
                 )
             })),
         ),

@@ -47,7 +47,7 @@ use std::collections::BTreeMap;
 use mise::books::BookKey;
 
 pub use check::{Repo, check};
-pub use edit::{Change, EditError, Edited, edit};
+pub use edit::{BookNames, Change, EditError, Edited, Manifests, edit};
 pub use kind::Domain;
 pub use write::{
     CreateError, Fingerprint, NewBibleProject, NewBook, NewLanguage, create_bible, fingerprint,

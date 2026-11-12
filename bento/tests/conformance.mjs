@@ -124,6 +124,34 @@ try {
   refused = e;
 }
 check(refused !== undefined && /listed already/.test(String(refused)), "adding a listed book throws");
+
+// --- the Manifests handle ------------------------------------------------------
+{
+  const m = bento.open(created);
+  check(same(m.addBook(book("MRK", "Mak")), []), "addBook: no findings");
+  const renamed = m.renameBook({ book: "MRK", short: "Gutnius Mak", long: "Gutnius bilong Mak", abbr: "Mk" });
+  check(same(renamed, []), "renameBook: no findings", renamed);
+  const stray = m.renameBook({ book: "JHN", short: "Jon" });
+  check(stray.length === 2 && stray.every((f) => f.severity === "warning"), "renameBook: an unlisted book warns, per manifest", stray);
+  let threw;
+  try {
+    m.addBook(book("ROM", "Rom"));
+  } catch (e) {
+    threw = e;
+  }
+  check(/listed already/.test(String(threw)), "addBook throws on a listed book");
+  const names = m.names();
+  check(
+    same(names["metadata.json"].MRK, { short: "Gutnius Mak", long: "Gutnius bilong Mak", abbr: "Mk" }) &&
+      same(names["manifest.yaml"].MRK, { short: "Gutnius Mak" }),
+    "names: each manifest's, in the project's language",
+    names,
+  );
+  const out = m.finish();
+  check(same([...out.files.keys()], ["metadata.json", "manifest.yaml"]) && out.findings.length === 2, "finish: both files, every call's findings");
+  const mrk = bento.read("metadata.json", out.files.get("metadata.json")).detail.document.localizedNames.MRK;
+  check(same(mrk.short, { en: "Mark", tpi: "Gutnius Mak" }), "canon's English under en, the language's own under its tag", mrk);
+}
 check(same(bento.fingerprint(enc.encode("abc")), { md5: "900150983cd24fb0d6963f7d28e17f72", size: 3 }), "fingerprint");
 
 // --- Standard Schema ---------------------------------------------------------

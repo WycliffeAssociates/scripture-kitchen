@@ -1,0 +1,27 @@
+---
+id: aa545048-a59e-46bf-b844-5dad0090aabc
+title: "bento book names: one handle over both manifests (choices)"
+kind: note
+status: done
+created: 2026-11-12
+updated: 2026-11-12
+priority: 3
+tags: [choices, bento]
+source: Sefer's RFC "Book names — bento renames listed books" (2026-11-12) and its review with Will
+---
+
+The RFC asked for `Change.rename_books`. Review with Will (2026-11-12) turned it into a handle.
+
+```text
+open(files) → addBook / renameBook / updateChecksum / names → finish → { files, findings }
+```
+
+- **One handle, not one per format.** Calls are about books; Sefer keeps both manifests in step anyway. A format difference is a finding.
+- **Calls apply in order; a failed call changes nothing.** That settles "a book in both add and rename": add, then rename. A new book gets `long`/`abbr` that way.
+- **Book names.** Burrito `short.en` is canon's English, `short[tag]` the language's own (`long`, `abbr` only under the tag). create/add write it so; a rename replaces an `en` that is a copy of the old `[tag]` value (bento wrote copies before) and keeps a real English one. Will knows of no WA tool that needs vernacular names under `en`.
+- **No `und`.** A Burrito with no BCP 47 `languages[0].tag` gets a warning and isn't renamed; an add there writes only the English name.
+- **The fork requires `short`.** A rename with only long/abbr for a book with no entry is a warning, not a write. The fork doesn't require `en` on book names (only `language.name` does).
+- **RC titles are spliced, keeping their quotes.** yaml-edit's `set` drops quotes, so bento replaces the title scalar's byte range itself: works in block lists, flow lists and flow items. A missing `title` is appended last (`set`). An item listed twice is renamed twice, with a warning.
+- **Tests:** YAML byte-identical except the titles; JSON unchanged outside the renamed lines for Sefer-shaped files (a foreign-formatted one is reformatted once). Will, on the JSON bar: fine.
+- **`book-title-translated` reads only the language's own name.**
+- **Sefer side, not here:** `short` = `\toc2`, else `\h`, never `\toc1`, one function shared with the finding. Sefer's `bookName` prefers `defaultLocale` (`en`), so it must prefer the project's language tag before it takes this release, or its sidebar turns English.

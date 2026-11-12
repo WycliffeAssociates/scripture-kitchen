@@ -1,6 +1,140 @@
 /* @ts-self-types="./bento.d.ts" */
 
 /**
+ * A project's manifests, open for editing: `bento.ts`'s `open`.
+ */
+export class Manifests {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ManifestsFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_manifests_free(ptr, 0);
+    }
+    /**
+     * `book`: `{book: "MRK", title: "Mak"}`.
+     * @param {string} book
+     * @param {Uint8Array} bytes
+     * @returns {string}
+     */
+    addBook(book, bytes) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(book, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.manifests_addBook(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Ends the handle: `{files, findings}`, as `edit` returns.
+     * @returns {object}
+     */
+    finish() {
+        const ptr = this.__destroy_into_raw();
+        const ret = wasm.manifests_finish(ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {string}
+     */
+    names() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.manifests_names(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * `canon`: `"protestant66"` (the default) or `"withDeuterocanon"`.
+     * @param {Map<any, any>} existing
+     * @param {string | null} [canon]
+     */
+    constructor(existing, canon) {
+        var ptr0 = isLikeNone(canon) ? 0 : passStringToWasm0(canon, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        const ret = wasm.manifests_open(existing, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        ManifestsFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * `names`: `{book: "JHN", short?, long?, abbr?}`.
+     * @param {string} names
+     * @returns {string}
+     */
+    renameBook(names) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(names, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.manifests_renameBook(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * @param {string} path
+     * @param {Uint8Array} bytes
+     * @returns {string}
+     */
+    updateChecksum(path, bytes) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.manifests_updateChecksum(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            deferred3_0 = ret[0];
+            deferred3_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) Manifests.prototype[Symbol.dispose] = Manifests.prototype.free;
+
+/**
  * @param {string} name
  * @param {Uint8Array} bytes
  * @param {string | null} [repo_name]
@@ -238,6 +372,10 @@ function __wbg_get_imports() {
 function wasm_bindgen_a705d1ccab00a4e4___convert__closures_____invoke___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined_______true_(arg0, arg1, arg2, arg3) {
     wasm.wasm_bindgen_a705d1ccab00a4e4___convert__closures_____invoke___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined_______true_(arg0, arg1, arg2, arg3);
 }
+
+const ManifestsFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_manifests_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();

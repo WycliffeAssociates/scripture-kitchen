@@ -6,6 +6,9 @@
 //! check(name, bytes, repoName?, files?)         → JSON ManifestFinding[]
 //! createBible(projectJson, bookBytes[], formats) → Map<name, bytes>
 //! edit(existing, changeJson, addBytes[], checksumBytes[]) → {files: Map<name, bytes>, findings: JSON}
+//! new Manifests(existing, canon?)               a handle; each call → JSON ManifestFinding[]
+//!   .addBook(bookJson, bytes) .renameBook(namesJson) .updateChecksum(path, bytes)
+//!   .names() → JSON {file: {BOOK: {short?, long?, abbr?}}}    .finish() → as edit's
 //! fingerprint(bytes)                            → JSON {md5, size}
 //! writerProject(bytes, repo?)                   → JSON WriterProject | undefined
 //! ```
@@ -17,7 +20,7 @@ use js_sys::{Array, Map, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
 use crate::tree::{Node, from_json};
-use crate::{Change, Format, Repo, js};
+use crate::{BookNames, Change, Format, Repo, js};
 
 fn bytes_of(array: &Array) -> Vec<Vec<u8>> {
     array.iter().map(|v| Uint8Array::new(&v).to_vec()).collect()
@@ -144,6 +147,10 @@ pub fn edit_js(
     };
     let edited =
         crate::edit(&files_of(&existing), &change).map_err(|e| JsError::new(&e.to_string()))?;
+    edited_js(&edited)
+}
+
+fn edited_js(edited: &crate::Edited) -> Result<Object, JsError> {
     let out = Object::new();
     Reflect::set(&out, &"files".into(), &to_map(&edited.files))
         .map_err(|_| JsError::new("set files"))?;
@@ -154,6 +161,93 @@ pub fn edit_js(
     )
     .map_err(|_| JsError::new("set findings"))?;
     Ok(out)
+}
+
+/// A project's manifests, open for editing: `bento.ts`'s `open`.
+#[wasm_bindgen(js_name = Manifests)]
+pub struct ManifestsJs(crate::Manifests);
+
+fn findings_js(found: &[crate::ManifestFinding]) -> String {
+    js::findings(found).to_json()
+}
+
+fn book_key(node: &Node) -> Result<mise::books::BookKey, JsError> {
+    let code = js::want_text(node, "book").map_err(|e| JsError::new(&e))?;
+    crate::book_of(&code).ok_or_else(|| JsError::new(&format!("{code} isn't a book of canon's table")))
+}
+
+#[wasm_bindgen(js_class = Manifests)]
+impl ManifestsJs {
+    /// `canon`: `"protestant66"` (the default) or `"withDeuterocanon"`.
+    #[wasm_bindgen(constructor)]
+    pub fn open(existing: Map, canon: Option<String>) -> Result<ManifestsJs, JsError> {
+        let canon = js::canon_of(&Node::map([(
+            "canon",
+            canon.map_or(Node::Null, Node::text),
+        )]))
+        .map_err(|e| JsError::new(&e))?;
+        crate::Manifests::open(&files_of(&existing), canon)
+            .map(ManifestsJs)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// `book`: `{book: "MRK", title: "Mak"}`.
+    #[wasm_bindgen(js_name = addBook)]
+    pub fn add_book(&mut self, book: &str, bytes: Vec<u8>) -> Result<String, JsError> {
+        let node = Node::map([("books", Node::List(vec![parse(book)?]))]);
+        let mut books = js::books(&node, "books", vec![bytes]).map_err(|e| JsError::new(&e))?;
+        let found = self
+            .0
+            .add_book(books.remove(0))
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(findings_js(&found))
+    }
+
+    /// `names`: `{book: "JHN", short?, long?, abbr?}`.
+    #[wasm_bindgen(js_name = renameBook)]
+    pub fn rename_book(&mut self, names: &str) -> Result<String, JsError> {
+        let node = parse(names)?;
+        let name = |key: &str| match node.get(key) {
+            Some(Node::String(s)) => Ok(Some(s.clone())),
+            None | Some(Node::Null) => Ok(None),
+            Some(other) => Err(JsError::new(&format!("{key} must be text, not {}", other.kind()))),
+        };
+        let found = self
+            .0
+            .rename_book(BookNames {
+                book: book_key(&node)?,
+                short: name("short")?,
+                long: name("long")?,
+                abbr: name("abbr")?,
+            })
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(findings_js(&found))
+    }
+
+    #[wasm_bindgen(js_name = updateChecksum)]
+    pub fn update_checksum(&mut self, path: &str, bytes: &[u8]) -> String {
+        findings_js(&self.0.update_checksum(path, bytes))
+    }
+
+    pub fn names(&self) -> String {
+        Node::map(self.0.names().into_iter().map(|(file, books)| {
+            (
+                file,
+                Node::map(books.into_iter().map(|b| {
+                    let fields = [("short", b.short), ("long", b.long), ("abbr", b.abbr)]
+                        .into_iter()
+                        .filter_map(|(k, v)| v.map(|v| (k, Node::text(v))));
+                    (b.book.to_string(), Node::map(fields))
+                })),
+            )
+        }))
+        .to_json()
+    }
+
+    /// Ends the handle: `{files, findings}`, as `edit` returns.
+    pub fn finish(self) -> Result<Object, JsError> {
+        edited_js(&self.0.finish())
+    }
 }
 
 #[wasm_bindgen(js_name = fingerprint)]

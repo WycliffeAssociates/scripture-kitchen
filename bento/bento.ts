@@ -2,7 +2,7 @@
  * bento: a repo's manifest, read, checked, created and edited. TypeScript over
  * one wasm module; every rule lives in the Rust (`bento/src`), once.
  *
- *     import { init, find, read, readOrThrow, check, createBible, edit, schemas } from
+ *     import { init, find, read, readOrThrow, check, createBible, open, edit, schemas } from
  *       "@wycliffeassociates/scripture-kitchen/bento";
  *     await init();                                    // or initSync({ module: bytes })
  *
@@ -12,7 +12,13 @@
  *     readOrThrow(name, bytes);                        // throws when any finding is an error
  *     check(name, bytes, { name: "Tech_Advance/tpi_reg", files });  // findings that need the repo
  *     createBible(project);                            // Map { "metadata.json" => …, "manifest.yaml" => … }
- *     edit(existing, { addBooks, checksums });         // { files: only those that changed, findings }
+ *     const m = open(existing);                        // every manifest the project has, open for editing
+ *     m.addBook({ book: "MRK", title: "Mak", bytes });  // each call → its findings; one that throws changes nothing
+ *     m.renameBook({ book: "JHN", short: "Yohani", long, abbr });
+ *     m.updateChecksum("41-MAT.usfm", bytes);
+ *     m.names();                                       // { "metadata.json": { JHN: { short, long, abbr } }, … }
+ *     m.finish();                                      // { files: only those that changed, findings }
+ *     edit(existing, { addBooks, checksums });         // the same, in one call
  *     writerProject(bytes, "tmf_3jn_text_reg");        // a Writer manifest's book project, or undefined
  *
  * Reading never changes anything and never throws: what it forgave or found
@@ -335,6 +341,60 @@ export const edit = (
     checksums.map(([, b]) => b),
   ) as { files: Map<string, Uint8Array>; findings: string };
   return { files: out.files, findings: JSON.parse(out.findings) };
+};
+
+/** A book's names in the project's language: `\toc2`, `\toc1`, `\toc3`. */
+export interface BookNames {
+  book: BookCode;
+  /** A Burrito's `short`, an RC's `title`. */
+  short?: string;
+  /** A Burrito's `long`; an RC has none. */
+  long?: string;
+  /** A Burrito's `abbr`; an RC has none. */
+  abbr?: string;
+}
+
+/**
+ * A project's manifests, open for editing. Calls apply in the order made, and
+ * each returns its findings; one that throws changes nothing. `finish` ends
+ * the handle (a dropped one is freed by the garbage collector; `free` frees
+ * it now).
+ */
+export interface Manifests {
+  /** List a book. Throws if it's listed already or isn't in the canon. */
+  addBook(book: NewBook): ManifestFinding[];
+  /**
+   * Set a listed book's names. A Burrito's go under its language's tag, with
+   * canon's English under `en`; an RC's title is `short`. A missing or blank
+   * name is left as it is; a book a manifest doesn't list is a warning.
+   */
+  renameBook(names: BookNames): ManifestFinding[];
+  /** Bring a file's Burrito md5 and size up to date. */
+  updateChecksum(path: string, bytes: Uint8Array): ManifestFinding[];
+  /** Each manifest's names for its books, in the project's language. */
+  names(): Record<string, Record<BookCode, Omit<BookNames, "book">>>;
+  /** The files that changed, and every call's findings. */
+  finish(): { files: Map<string, Uint8Array>; findings: ManifestFinding[] };
+  free(): void;
+}
+
+/** Open the manifests in `existing` (by file name). Throws on an unreadable Burrito. */
+export const open = (
+  existing: ReadonlyMap<string, Uint8Array>,
+  canon: "protestant66" | "withDeuterocanon" = "protestant66",
+): Manifests => {
+  const handle = new raw.Manifests(new Map(existing), canon);
+  return {
+    addBook: ({ book, title, bytes }) => JSON.parse(handle.addBook(JSON.stringify({ book, title }), bytes)),
+    renameBook: (names) => JSON.parse(handle.renameBook(JSON.stringify(names))),
+    updateChecksum: (path, bytes) => JSON.parse(handle.updateChecksum(path, bytes)),
+    names: () => JSON.parse(handle.names()),
+    finish: () => {
+      const out = handle.finish() as { files: Map<string, Uint8Array>; findings: string };
+      return { files: out.files, findings: JSON.parse(out.findings) };
+    },
+    free: () => handle.free(),
+  };
 };
 
 /** A file's md5 and size, as a Burrito ingredient records them. */

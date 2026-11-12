@@ -39,6 +39,12 @@ read.findings;                                         // [{ check: "sort-canon"
 const files = bento.createBible(project, ["burrito", "rc"]);       // Map: metadata.json, manifest.yaml
 const edited = bento.edit(files, { addBooks: [mrk], checksums: [] }); // only the files that changed
 
+const m = bento.open(files);                            // every manifest the project has
+m.addBook(mrk);                                         // each call → its findings; a throw changes nothing
+m.renameBook({ book: "JHN", short: "Yohani", long, abbr }); // Burrito: under the tag, canon's English under en; RC: title
+m.names();                                              // { "metadata.json": { JHN: { short, long, abbr } }, … }
+m.finish();                                             // { files: only those that changed, findings }
+
 bento.writerProject(manifestJson, "tmf_3jn_text_reg"); // { book: "3JN", language, resource: "reg", sources, translators }
 ```
 
@@ -50,8 +56,10 @@ bento.writerProject(manifestJson, "tmf_3jn_text_reg"); // { book: "3JN", languag
   - warnings: `manifest-valid` (against the fork's rules), `title-set`, `language-set`, `ingredient-exists`, `ingredient-checksum`;
   - info: `lenient-value`, `book-title-translated`, `sort-canon`.
 - **`check` takes the repo as well.** Given the repo's name and files, it also reports a repo name that disagrees with the language, and ingredients that are missing, empty or stale.
-- **Edits are minimal.** A Burrito is rewritten as `JSON.stringify(v, null, 2)` would write it. An RC has the new project's lines spliced in. Old `sort` values are never renumbered; a clash is reported instead.
-- **Across the wall:** one wasm module with seven doors (`find`, `read`, `check`, `createBible`, `edit`, `fingerprint`, `writerProject`). Structured values cross as JSON. `bento.ts` adds the types, `readOrThrow` and Standard Schema v1 `schemas` for each format.
+- **Edits are minimal.** A Burrito is rewritten as `JSON.stringify(v, null, 2)` would write it. An RC has the new project's lines spliced in, and a rename replaces only the title's bytes, in the quoting it had, in block or flow lists. Old `sort` values are never renumbered; a clash is reported instead.
+- **One handle over both formats.** `Manifests` (`bento.open`) takes calls in order; where the formats differ (an RC keeps only the short name, lists no checksums) the difference is a finding, not a second API. `edit` is the same in one call.
+- **Book names:** a Burrito's `en` is canon's English and the language's tag holds its own names; an RC's title is the language's short name. `book-title-translated` looks only at the language's own.
+- **Across the wall:** one wasm module with seven doors (`find`, `read`, `check`, `createBible`, `edit`, `fingerprint`, `writerProject`) and the `Manifests` handle. Structured values cross as JSON. `bento.ts` adds the types, `readOrThrow` and Standard Schema v1 `schemas` for each format.
 
 ## Composes with
 
