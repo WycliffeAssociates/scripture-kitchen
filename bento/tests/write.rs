@@ -856,6 +856,13 @@ fn an_rc_title_changes_in_place_in_every_list_style() {
     let (after, _) = renamed_rc(untitled, b"JHN", "Yohani");
     assert_eq!(after, "projects:\n  - identifier: jhn\n    path: ./44-JHN.usfm\n    title: Yohani\n");
 
+    let empty = "projects:\n  - title:\n    identifier: jhn\n  - identifier: 2jn\n    title:\n";
+    let (after, _) = renamed_rc(empty, b"JHN", "Jon: Gutnius");
+    assert_eq!(after, "projects:\n  - title: \"Jon: Gutnius\"\n    identifier: jhn\n  - identifier: 2jn\n    title:\n");
+    let (after, _) = renamed_rc(empty, b"2JN", "2 Jon");
+    assert!(after.ends_with("    title: 2 Jon\n"), "{after}");
+    assert_eq!(paths(&after).len(), 2, "{after}");
+
     let twice = "projects:\n  - title: John\n    identifier: jhn\n  - title: John\n    identifier: jhn\n";
     let (after, found) = renamed_rc(twice, b"JHN", "Yohani");
     assert_eq!(after.matches("title: Yohani").count(), 2, "{after}");
@@ -890,4 +897,8 @@ fn an_english_name_beside_the_languages_own_isnt_untranslated() {
     let mut m = open(&files);
     m.rename_book(names(b"MAT", "Matthew", "", "")).unwrap();
     assert_eq!(titles(&m.finish().files[0].1), 1, "its tpi name is the English one");
+    // A book with only an English name has none in the language: still said.
+    let mut doc: Value = serde_json::from_slice(&files[0].1).unwrap();
+    doc["localizedNames"]["MAT"]["short"].as_object_mut().unwrap().remove("tpi");
+    assert_eq!(titles(&serde_json::to_vec(&doc).unwrap()), 1);
 }

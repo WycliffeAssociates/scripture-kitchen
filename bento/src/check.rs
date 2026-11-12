@@ -195,12 +195,15 @@ pub(crate) fn manifest_only(manifest: &Manifest, detail: &Detail, out: &mut Vec<
         if !english && !manifest.language.tag.is_empty() {
             // Only the language's own name: an `en` name beside it is canon's English, as it should be.
             let tag = manifest.language.tag.trim();
-            let mut own = entry
+            // With no name in the language at all, any name stands for it.
+            let own: Vec<&String> = entry
                 .title
                 .iter()
                 .filter(|(k, _)| k.eq_ignore_ascii_case(tag))
-                .map(|(_, v)| v);
-            let untranslated = own.find(|title| {
+                .map(|(_, v)| v)
+                .collect();
+            let names = if own.is_empty() { entry.title.values().collect() } else { own };
+            let untranslated = names.into_iter().find(|title| {
                 let title = title.trim();
                 title.eq_ignore_ascii_case(book.english)
                     || book.aliases.iter().any(|a| title.eq_ignore_ascii_case(a))

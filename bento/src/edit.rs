@@ -674,7 +674,9 @@ fn rename_rc(
             Some(title) => {
                 let range = title.byte_range();
                 let (start, end) = (range.start as usize, range.end as usize);
-                splices.push((start, end, requoted(&text[start..end], short)));
+                // An empty `title:` is a null with no bytes, right after the colon.
+                let space = if text[..start].ends_with([' ', '\t']) { "" } else { " " };
+                splices.push((start, end, format!("{space}{}", requoted(&text[start..end], short))));
             }
             None => untitled = true,
         }
