@@ -173,7 +173,8 @@ fn findings_js(found: &[crate::ManifestFinding]) -> String {
 
 fn book_key(node: &Node) -> Result<mise::books::BookKey, JsError> {
     let code = js::want_text(node, "book").map_err(|e| JsError::new(&e))?;
-    crate::book_of(&code).ok_or_else(|| JsError::new(&format!("{code} isn't a book of canon's table")))
+    crate::book_of(&code)
+        .ok_or_else(|| JsError::new(&format!("{code} isn't a book of canon's table")))
 }
 
 #[wasm_bindgen(js_class = Manifests)]
@@ -210,7 +211,10 @@ impl ManifestsJs {
         let name = |key: &str| match node.get(key) {
             Some(Node::String(s)) => Ok(Some(s.clone())),
             None | Some(Node::Null) => Ok(None),
-            Some(other) => Err(JsError::new(&format!("{key} must be text, not {}", other.kind()))),
+            Some(other) => Err(JsError::new(&format!(
+                "{key} must be text, not {}",
+                other.kind()
+            ))),
         };
         let found = self
             .0

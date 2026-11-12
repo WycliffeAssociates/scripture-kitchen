@@ -202,7 +202,11 @@ pub(crate) fn manifest_only(manifest: &Manifest, detail: &Detail, out: &mut Vec<
                 .filter(|(k, _)| k.eq_ignore_ascii_case(tag))
                 .map(|(_, v)| v)
                 .collect();
-            let names = if own.is_empty() { entry.title.values().collect() } else { own };
+            let names = if own.is_empty() {
+                entry.title.values().collect()
+            } else {
+                own
+            };
             let untranslated = names.into_iter().find(|title| {
                 let title = title.trim();
                 title.eq_ignore_ascii_case(book.english)

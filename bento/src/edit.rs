@@ -120,8 +120,15 @@ struct File {
 
 #[derive(Debug, Clone)]
 enum Body {
-    Burrito { root: Node, before: Node },
-    Rc { text: String, before: String, bom: bool },
+    Burrito {
+        root: Node,
+        before: Node,
+    },
+    Rc {
+        text: String,
+        before: String,
+        bom: bool,
+    },
     /// An RC that isn't UTF-8: an error only for a call that must edit it.
     Broken(String),
     /// Not a format bento edits (BTT Writer's).
@@ -256,7 +263,11 @@ impl Manifests {
                         (root != before).then(|| root.to_json().into_bytes())
                     }
                     Body::Rc { text, before, bom } => (text != before).then(|| {
-                        let mut out = if bom { "\u{FEFF}".to_owned() } else { String::new() };
+                        let mut out = if bom {
+                            "\u{FEFF}".to_owned()
+                        } else {
+                            String::new()
+                        };
                         out.push_str(&text);
                         out.into_bytes()
                     }),
@@ -351,7 +362,8 @@ fn is_language_tag(tag: &str) -> bool {
     let first = parts.next().unwrap_or_default();
     let first_ok = (2..=8).contains(&first.len()) && first.bytes().all(|b| b.is_ascii_alphabetic())
         || matches!(first, "x" | "i");
-    first_ok && parts.all(|p| (1..=8).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+    first_ok
+        && parts.all(|p| (1..=8).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
 fn burrito_listed(root: &Node) -> Vec<BookKey> {
@@ -422,7 +434,11 @@ fn add_burrito(
         let at = position(order, book, books.into_iter());
         let short = match &tag {
             Some(tag) => book_name(tag, book, &p.book.title),
-            None => book_name("en", book, canon::book(book).map_or(&p.book.title, |b| b.english)),
+            None => book_name(
+                "en",
+                book,
+                canon::book(book).map_or(&p.book.title, |b| b.english),
+            ),
         };
         insert_at(names, at, code, Node::map([("short", short)]));
     }
@@ -563,7 +579,8 @@ fn burrito_names(root: &Node) -> Vec<BookNames> {
     all.entries()
         .iter()
         .filter_map(|(k, v)| {
-            let name = |field: &str| text_of(v.get(field).and_then(|f| f.get(&tag))).map(str::to_owned);
+            let name =
+                |field: &str| text_of(v.get(field).and_then(|f| f.get(&tag))).map(str::to_owned);
             Some(BookNames {
                 book: book_of(k)?,
                 short: name("short"),
@@ -675,8 +692,16 @@ fn rename_rc(
                 let range = title.byte_range();
                 let (start, end) = (range.start as usize, range.end as usize);
                 // An empty `title:` is a null with no bytes, right after the colon.
-                let space = if text[..start].ends_with([' ', '\t']) { "" } else { " " };
-                splices.push((start, end, format!("{space}{}", requoted(&text[start..end], short))));
+                let space = if text[..start].ends_with([' ', '\t']) {
+                    ""
+                } else {
+                    " "
+                };
+                splices.push((
+                    start,
+                    end,
+                    format!("{space}{}", requoted(&text[start..end], short)),
+                ));
             }
             None => untitled = true,
         }
@@ -725,7 +750,9 @@ fn rc_names(text: &str) -> Vec<BookNames> {
         .iter()
         .filter_map(|m| {
             let short = match m.get("title") {
-                Some(yaml_edit::YamlNode::Scalar(s)) => Some(s.as_string()).filter(|t| !t.is_empty()),
+                Some(yaml_edit::YamlNode::Scalar(s)) => {
+                    Some(s.as_string()).filter(|t| !t.is_empty())
+                }
                 _ => None,
             };
             Some(BookNames {
