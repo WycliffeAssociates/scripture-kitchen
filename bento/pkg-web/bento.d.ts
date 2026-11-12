@@ -1,6 +1,32 @@
 /* tslint:disable */
 /* eslint-disable */
 
+/**
+ * A project's manifests, open for editing: `bento.ts`'s `open`.
+ */
+export class Manifests {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * `book`: `{book: "MRK", title: "Mak"}`.
+     */
+    addBook(book: string, bytes: Uint8Array): string;
+    /**
+     * Ends the handle: `{files, findings}`, as `edit` returns.
+     */
+    finish(): object;
+    names(): string;
+    /**
+     * `canon`: `"protestant66"` (the default) or `"withDeuterocanon"`.
+     */
+    constructor(existing: Map<any, any>, canon?: string | null);
+    /**
+     * `names`: `{book: "JHN", short?, long?, abbr?}`.
+     */
+    renameBook(names: string): string;
+    updateChecksum(path: string, bytes: Uint8Array): string;
+}
+
 export function check(name: string, bytes: Uint8Array, repo_name?: string | null, files?: Map<any, any> | null): string;
 
 export function createBible(project: string, book_bytes: Array<any>, formats: string[]): Map<any, any>;
@@ -25,11 +51,18 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_manifests_free: (a: number, b: number) => void;
     readonly check: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly createBible: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
     readonly edit: (a: any, b: number, c: number, d: any, e: any) => [number, number, number];
     readonly find: (a: number, b: number) => [number, number];
     readonly fingerprint: (a: number, b: number) => [number, number];
+    readonly manifests_addBook: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly manifests_finish: (a: number) => [number, number, number];
+    readonly manifests_names: (a: number) => [number, number];
+    readonly manifests_open: (a: any, b: number, c: number) => [number, number, number];
+    readonly manifests_renameBook: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly manifests_updateChecksum: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly read: (a: number, b: number, c: number, d: number) => [number, number];
     readonly writerProject: (a: number, b: number, c: number, d: number) => [number, number];
     readonly wasm_bindgen_a705d1ccab00a4e4___convert__closures_____invoke___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;

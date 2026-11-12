@@ -106,13 +106,17 @@ fn a_created_burrito_passes_the_forks_schema_and_reads_back_clean() {
     assert_eq!(r.findings, [], "{:#?}", r.findings);
     let m = r.manifest.unwrap();
     assert_eq!(m.id.as_deref(), Some("Tech_Advance/tpi_reg"));
-    // `en` is the default locale, and every name carries it beside the project's own tag.
+    // `en` is the default locale, and the project's names carry it beside the project's own tag.
     let both =
         |t: &str| bento::LocalizedText::from([("en".into(), t.into()), ("tpi".into(), t.into())]);
     assert_eq!(m.name, both("Baibel"));
     assert_eq!(m.abbreviation, both("reg"));
     assert_eq!(m.language.name, both("Tok Pisin"));
-    assert_eq!(m.books[0].title, both("Matyu"));
+    // A book's `en` is canon's English; the language's own name is under its tag.
+    assert_eq!(
+        m.books[0].title,
+        bento::LocalizedText::from([("en".into(), "Matthew".into()), ("tpi".into(), "Matyu".into())])
+    );
     let Some(bento::Detail::Burrito(doc)) = read("metadata.json", metadata).detail else {
         panic!()
     };
@@ -623,4 +627,267 @@ fn the_splice_finds_an_items_dash_its_end_and_the_documents_end() {
     let after = added(opened, b"MAT", "Matyu");
     assert!(after.ends_with("---\nother: 1\n"), "{after}");
     assert_eq!(paths(&after).len(), 1, "{after}");
+}
+
+// --- Book names ---------------------------------------------------------------
+
+fn names(code: &[u8; 3], short: &str, long: &str, abbr: &str) -> bento::BookNames {
+    let some = |s: &str| Some(s.to_owned());
+    bento::BookNames {
+        book: BookKey::new(*code),
+        short: some(short),
+        long: some(long),
+        abbr: some(abbr),
+    }
+}
+
+fn open(files: &[(String, Vec<u8>)]) -> bento::Manifests {
+    bento::Manifests::open(files, Canon::Protestant66).unwrap()
+}
+
+/// The lines that differ, as (before, after), for files of the same length.
+fn changed_lines(before: &[u8], after: &[u8]) -> Vec<(String, String)> {
+    let (b, a) = (String::from_utf8_lossy(before), String::from_utf8_lossy(after));
+    assert_eq!(b.lines().count(), a.lines().count(), "{a}");
+    b.lines()
+        .zip(a.lines())
+        .filter(|(x, y)| x != y)
+        .map(|(x, y)| (x.to_owned(), y.to_owned()))
+        .collect()
+}
+
+// Why: the manifest follows the book (the RFC's rule). A rename writes the
+// language's names under its tag, keeps canon's English beside them, and
+// moves nothing else; the RC takes the short name as its title.
+#[test]
+fn a_rename_writes_the_languages_names_and_nothing_else() {
+    let files = files_of(&project());
+    let mut m = open(&files);
+    let found = m.rename_book(names(b"MAT", " Gutpela Nius Matyu ", "Gutnius bilong Matyu", "Mt")).unwrap();
+    assert_eq!(found, []);
+    let edited = m.finish();
+    assert_eq!(edited.findings, []);
+    let (burrito, rc) = (&edited.files[0].1, &edited.files[1].1);
+    assert_eq!(errors(burrito), Vec::<String>::new());
+    let Some(bento::Detail::Burrito(doc)) = read("metadata.json", burrito).detail else {
+        panic!()
+    };
+    let (code, mat) = &doc.localized_names[0];
+    assert_eq!(code, "MAT");
+    let text = |pairs: &[(&str, &str)]| -> bento::LocalizedText {
+        pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect()
+    };
+    assert_eq!(mat.short, text(&[("en", "Matthew"), ("tpi", "Gutpela Nius Matyu")]));
+    assert_eq!(mat.long, text(&[("tpi", "Gutnius bilong Matyu")]));
+    assert_eq!(mat.abbr, text(&[("tpi", "Mt")]));
+    // The short name's line changes; long and abbr are new lines inside MAT.
+    let (before, after) = (String::from_utf8_lossy(&files[0].1), String::from_utf8_lossy(burrito));
+    assert_eq!(after.lines().count(), before.lines().count() + 6, "{after}");
+
+    let changed = changed_lines(&files[1].1, rc);
+    assert_eq!(
+        changed,
+        [("  - title: Matyu".into(), "  - title: Gutpela Nius Matyu".into())]
+    );
+}
+
+#[test]
+fn renaming_to_the_names_already_there_returns_no_file() {
+    let files = files_of(&project());
+    let mut m = open(&files);
+    m.rename_book(bento::BookNames {
+        book: BookKey::new(*b"MAT"),
+        short: Some("Matyu".into()),
+        long: Some("  ".into()),
+        abbr: None,
+    })
+    .unwrap();
+    let edited = m.finish();
+    assert_eq!(edited.files, [], "an empty name is no name; the short one is as it was");
+}
+
+// Why: bento used to copy the language's name under `en`. A rename replaces
+// such a copy with canon's English; an `en` name someone wrote stays.
+#[test]
+fn an_en_copy_becomes_english_and_a_real_one_stays() {
+    let files = files_of(&project());
+    let old = String::from_utf8(files[0].1.clone())
+        .unwrap()
+        .replace("\"en\": \"Matthew\"", "\"en\": \"Matyu\"")
+        .replace("\"en\": \"Romans\"", "\"en\": \"Rome letter\"");
+    let old = vec![("metadata.json".to_owned(), old.into_bytes())];
+    let mut m = open(&old);
+    m.rename_book(bento::BookNames { short: Some("Matyu Gutnius".into()), long: None, abbr: None, book: BookKey::new(*b"MAT") }).unwrap();
+    m.rename_book(bento::BookNames { short: Some("Rom Pas".into()), long: None, abbr: None, book: BookKey::new(*b"ROM") }).unwrap();
+    let names: Vec<(String, Option<String>)> = {
+        let Some(bento::Detail::Burrito(doc)) = read("metadata.json", &m.clone().finish().files[0].1).detail else {
+            panic!()
+        };
+        doc.localized_names.iter().map(|(k, n)| (k.clone(), n.short.get("en").cloned())).collect()
+    };
+    assert_eq!(
+        names,
+        [("MAT".into(), Some("Matthew".into())), ("ROM".into(), Some("Rome letter".into()))]
+    );
+}
+
+// Why: one stray book shouldn't block the rest, and a manifest that can't say
+// whose language a name is in isn't guessed at ("und").
+#[test]
+fn what_a_rename_cant_do_is_a_warning_and_the_rest_goes_ahead() {
+    let files = files_of(&project());
+    let mut m = open(&files);
+    let found = m.rename_book(names(b"JHN", "Jon", "", "")).unwrap();
+    let messages: Vec<&str> = found.iter().map(|f| f.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        [
+            "metadata.json doesn't list JHN, so its names weren't changed.",
+            "manifest.yaml doesn't list JHN, so its title wasn't changed."
+        ]
+    );
+    m.rename_book(names(b"ROM", "Rom Pas", "", "")).unwrap();
+    let edited = m.finish();
+    assert_eq!(edited.findings.len(), 2, "finish says every call's findings");
+    assert_eq!(edited.files.len(), 2, "ROM was renamed in both");
+
+    let untagged = String::from_utf8(files[0].1.clone()).unwrap().replace("\"tag\": \"tpi\",", "");
+    let mut m = open(&[("metadata.json".into(), untagged.into_bytes())]);
+    let found = m.rename_book(names(b"MAT", "Matyu Gutnius", "", "")).unwrap();
+    assert_eq!(found[0].message, "metadata.json names no language tag, so MAT's names weren't changed.");
+    assert_eq!(m.finish().files, []);
+}
+
+// Why: the fork requires `short` on a book's names, so a book with no entry
+// gets one only from a rename that gives a short name.
+#[test]
+fn a_book_with_no_names_gets_an_entry_placed_by_canon() {
+    let files = files_of(&project());
+    let mut doc: Value = serde_json::from_slice(&files[0].1).unwrap();
+    doc["localizedNames"].as_object_mut().unwrap().remove("MAT");
+    let bare = vec![("metadata.json".to_owned(), serde_json::to_vec_pretty(&doc).unwrap())];
+
+    let mut m = open(&bare);
+    let found = m.rename_book(bento::BookNames { book: BookKey::new(*b"MAT"), short: None, long: Some("Gutnius".into()), abbr: None }).unwrap();
+    assert!(found[0].message.contains("needs a short one"), "{found:?}");
+    m.rename_book(names(b"MAT", "Matyu", "", "")).unwrap();
+    let after = m.finish().files[0].1.clone();
+    assert_eq!(errors(&after), Vec::<String>::new());
+    let Some(bento::Detail::Burrito(doc)) = read("metadata.json", &after).detail else { panic!() };
+    let codes: Vec<&str> = doc.localized_names.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(codes, ["MAT", "ROM"]);
+    assert_eq!(doc.localized_names[0].1.short.get("en").map(String::as_str), Some("Matthew"));
+}
+
+// Why: Sefer's Record sends a new book in both calls (its \toc lines are
+// new). In order, the add lists it and the rename names it: long and abbr
+// reach the Burrito, and the RC has one title.
+#[test]
+fn add_then_rename_in_one_handle_is_one_consistent_file() {
+    let files = files_of(&project());
+    let mut m = open(&files);
+    m.add_book(book(b"MRK", "Mak")).unwrap();
+    m.rename_book(names(b"MRK", "Gutnius Mak", "Gutnius bilong Mak", "Mk")).unwrap();
+    m.update_checksum("41-MAT.usfm", b"\\id MAT\n\\c 1\n\\v 1 New.\n");
+    let edited = m.finish();
+    assert_eq!(edited.findings, []);
+    assert_eq!(errors(&edited.files[0].1), Vec::<String>::new());
+    let rc = String::from_utf8(edited.files[1].1.clone()).unwrap();
+    assert_eq!(rc.matches("title: Gutnius Mak").count(), 1, "{rc}");
+    assert!(!rc.contains("title: Mak\n"), "{rc}");
+    let r = read("manifest.yaml", rc.as_bytes());
+    assert_eq!(r.findings, []);
+}
+
+#[test]
+fn a_call_that_fails_changes_nothing() {
+    let files = files_of(&project());
+    let mut m = open(&files);
+    assert_eq!(m.add_book(book(b"ROM", "Rom")), Err(EditError::Listed(BookKey::new(*b"ROM"))));
+    assert!(m.add_book(book(b"TOB", "Tobit")).is_err());
+    assert_eq!(m.finish(), bento::Edited { files: vec![], findings: vec![] });
+}
+
+#[test]
+fn names_reads_each_manifest_in_the_projects_language() {
+    let files = files_of(&project());
+    let mut m = open(&files);
+    m.rename_book(names(b"ROM", "Rom Pas", "Pas bilong Rom", "Ro")).unwrap();
+    let got = m.names();
+    assert_eq!(got[0].0, "metadata.json");
+    assert_eq!(got[0].1[1], names(b"ROM", "Rom Pas", "Pas bilong Rom", "Ro"));
+    assert_eq!(got[1].0, "manifest.yaml");
+    assert_eq!(
+        got[1].1[1],
+        bento::BookNames { book: BookKey::new(*b"ROM"), short: Some("Rom Pas".into()), long: None, abbr: None }
+    );
+}
+
+fn renamed_rc(before: &str, code: &[u8; 3], short: &str) -> (String, Vec<bento::ManifestFinding>) {
+    let mut m = open(&[("manifest.yaml".into(), before.as_bytes().to_vec())]);
+    m.rename_book(bento::BookNames { book: BookKey::new(*code), short: Some(short.into()), long: None, abbr: None }).unwrap();
+    let edited = m.finish();
+    let after = edited.files.first().map_or_else(|| before.to_owned(), |(_, b)| String::from_utf8(b.clone()).unwrap());
+    (after, edited.findings)
+}
+
+// Why: an RC is edited as text, so the only bytes that change are the
+// title's, in the quoting it had, in any list style: the catalog's block
+// lists, comments, flow lists and flow items, a BOM.
+#[test]
+fn an_rc_title_changes_in_place_in_every_list_style() {
+    let block = "\u{FEFF}projects:\n  - title: 'John'   # English\n    identifier: jhn\n  -\n    title: \"2 John\"\n    identifier: 2jn\n";
+    let (after, found) = renamed_rc(block, b"JHN", "Yohani's");
+    assert_eq!(found, []);
+    assert_eq!(after, block.replace("'John'", "'Yohani''s'"));
+    let (after, _) = renamed_rc(block, b"2JN", "2 \"Yohani\"");
+    assert_eq!(after, block.replace("\"2 John\"", "\"2 \\\"Yohani\\\"\""));
+
+    let flow = "projects: [{title: John, identifier: jhn}, {identifier: 2jn, title: 2 John}]  # tail\n";
+    let (after, _) = renamed_rc(flow, b"2JN", "2 Yohani, Pas");
+    assert_eq!(after, "projects: [{title: John, identifier: jhn}, {identifier: 2jn, title: \"2 Yohani, Pas\"}]  # tail\n");
+    assert_eq!(paths(&after).len(), 2);
+
+    let mixed = "projects:\n- {title: John, identifier: jhn}\n- title: 2 John # c\n  identifier: 2jn\n";
+    let (after, _) = renamed_rc(mixed, b"JHN", "Yohani");
+    assert_eq!(after, mixed.replace("{title: John,", "{title: Yohani,"));
+
+    let untitled = "projects:\n  - identifier: jhn\n    path: ./44-JHN.usfm\n";
+    let (after, _) = renamed_rc(untitled, b"JHN", "Yohani");
+    assert_eq!(after, "projects:\n  - identifier: jhn\n    path: ./44-JHN.usfm\n    title: Yohani\n");
+
+    let twice = "projects:\n  - title: John\n    identifier: jhn\n  - title: John\n    identifier: jhn\n";
+    let (after, found) = renamed_rc(twice, b"JHN", "Yohani");
+    assert_eq!(after.matches("title: Yohani").count(), 2, "{after}");
+    assert_eq!(found[0].message, "manifest.yaml lists JHN 2 times; each one's title was changed.");
+}
+
+#[test]
+fn the_catalogs_rc_renames_one_line() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testData/exampleCorpora/bdf_reg/manifest.yaml");
+    let before = std::fs::read_to_string(&path).unwrap();
+    let (after, found) = renamed_rc(&before, b"MAT", "Injil Matius");
+    assert_eq!(found, []);
+    let changed = changed_lines(before.as_bytes(), after.as_bytes());
+    assert_eq!(changed.len(), 1, "{changed:?}");
+    assert!(changed[0].1.ends_with("title: Injil Matius"), "{changed:?}");
+}
+
+// Why: a Burrito's `en` names are canon's English now, so "the title is the
+// English name" looks only at the language's own.
+#[test]
+fn an_english_name_beside_the_languages_own_isnt_untranslated() {
+    use bento::Check;
+    let titles = |bytes: &[u8]| -> usize {
+        read("metadata.json", bytes)
+            .findings
+            .iter()
+            .filter(|f| f.check == Check::BookTitleTranslated)
+            .count()
+    };
+    let files = files_of(&project());
+    assert_eq!(titles(&files[0].1), 0, "MAT's en is Matthew, its tpi Matyu");
+    let mut m = open(&files);
+    m.rename_book(names(b"MAT", "Matthew", "", "")).unwrap();
+    assert_eq!(titles(&m.finish().files[0].1), 1, "its tpi name is the English one");
 }
